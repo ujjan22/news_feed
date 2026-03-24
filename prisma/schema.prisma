@@ -1,0 +1,110 @@
+generator client {
+  provider = "prisma-client-js"
+  output   = "../generated/prisma"
+}
+
+datasource db {
+  provider     = "postgresql"
+  relationMode = "foreignKeys"
+}
+
+enum ReactionType {
+  LIKE
+  LOVE
+  HAHA
+  WOW
+  SAD
+  ANGRY
+}
+
+enum Role {
+  ADMIN
+  GUEST
+}
+
+model User {
+  id      Int     @id @default(autoincrement())
+  name    String
+  profile String?
+  role    Role
+
+  posts          Post[]
+  comments       Comment[]
+  likes          Like[]
+  commentReplies CommentReply[]
+
+  @@index([role])
+}
+
+model Post {
+  id        Int      @id @default(autoincrement())
+  content   String
+  image     String?
+  location  String?
+  createdAt DateTime @default(now())
+
+  user   User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  userId Int
+
+  comments Comment[]
+  likes    Like[]
+
+  @@index([userId])
+  @@index([createdAt])
+}
+
+model Comment {
+  id        Int      @id @default(autoincrement())
+  text      String
+  createdAt DateTime @default(now())
+
+  user   User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  userId Int
+
+  post   Post @relation(fields: [postId], references: [id], onDelete: Cascade)
+  postId Int
+
+  replies CommentReply[]
+
+  @@index([userId])
+  @@index([postId])
+}
+
+model CommentReply {
+  id        Int      @id @default(autoincrement())
+  text      String
+  createdAt DateTime @default(now())
+
+  user   User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  userId Int
+
+  comment   Comment @relation(fields: [commentId], references: [id], onDelete: Cascade)
+  commentId Int
+
+  // Self-referencing for nested replies
+  parent   CommentReply? @relation("ReplyThread", fields: [parentId], references: [id], onDelete: Cascade)
+  parentId Int?
+
+  replies CommentReply[] @relation("ReplyThread")
+
+  @@index([commentId])
+  @@index([parentId])
+  @@index([userId])
+}
+
+model Like {
+  id Int @id @default(autoincrement())
+
+  user   User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  userId Int
+
+  post   Post @relation(fields: [postId], references: [id], onDelete: Cascade)
+  postId Int
+
+  reaction ReactionType @default(LIKE)
+  createdAt DateTime @default(now())
+
+  @@unique([userId, postId])
+  @@index([userId])
+  @@index([postId])
+}
