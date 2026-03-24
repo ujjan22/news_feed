@@ -1,14 +1,7 @@
 const express = require('express');
+const { prisma } = require("./prisma/prisma")
 const cors = require('cors');
-const { PrismaClient } = require('@prisma/client');
-
 const app = express();
-
-// ✅ Prevent multiple Prisma instances (important for Vercel)
-const prisma = global.prisma || new PrismaClient();
-if (process.env.NODE_ENV !== 'production') global.prisma = prisma;
-
-// ✅ CORS config
 app.use(cors({
   origin: [
     'http://localhost:3000',
@@ -22,85 +15,23 @@ app.use(cors({
 
 app.use(express.json());
 
-/* ===================== ROUTES ===================== */
+app.get('/posts', async (req, res) => {
+  const page = parseInt(req.query.page) || 1;
+  const limit = parseInt(req.query.limit) || 10;
 
-// ✅ Get posts (with pagination + reactions)
-app.get('/api/posts', async (req, res) => {
-  try {
-    const page = parseInt(req.query.page) || 1;
-    const limit = parseInt(req.query.limit) || 10;
-    const skip = (page - 1) * limit;
+  const skip = (page - 1) * limit;
 
-    const [posts, total] = await Promise.all([
-      prisma.post.findMany({
-        skip,
-        take: limit,
-        orderBy: { createdAt: 'desc' },
-        include: {
-          user: true,
-          comments: {
-            include: {
-              user: true,
-              replies: {
-                include: {
-                  user: true,
-                  replies: {
-                    include: { user: true }
-                  }
-                }
-              }
-            }
-          },
-          likes: true,
-          _count: {
-            select: {
-              comments: true,
-              likes: true
-            }
-          }
-        }
-      }),
-      prisma.post.count()
-    ]);
-
-    const postsWithReactions = posts.map(post => {
-      const reactionCounts = {};
-      post.likes.forEach(like => {
-        const type = like.reaction;
-        reactionCounts[type] = (reactionCounts[type] || 0) + 1;
-      });
-
-      return { ...post, reactionCounts };
-    });
-
-    res.json({
-      data: postsWithReactions,
-      meta: {
-        total,
-        page,
-        limit,
-        totalPages: Math.ceil(total / limit)
-      }
-    });
-
-  } catch (error) {
-    console.error(error);
-    res.status(500).json({ error: "Internal server error" });
-  }
-});
-
-// ✅ Get single post
-app.get('/api/posts/:id', async (req, res) => {
-  try {
-    const id = parseInt(req.params.id);
-    if (isNaN(id)) {
-      return res.status(400).json({ error: "Invalid post id" });
-    }
-
-    const post = await prisma.post.findUnique({
-      where: { id },
+  const [posts, total] = await Promise.all([
+    prisma.post.findMany({
+      skip,
+      take: limit,
+      orderBy: {
+        createdAt: 'desc'
+      },
       include: {
         user: true,
+
+        // ✅ nested comments + replies
         comments: {
           include: {
             user: true,
@@ -108,21 +39,94 @@ app.get('/api/posts/:id', async (req, res) => {
               include: {
                 user: true,
                 replies: {
-                  include: { user: true }
+                  include: {
+                    user: true
+                  }
                 }
               }
             }
           }
         },
-        likes: true
+
+        // ✅ include reactions
+        likes: true,
+
+        _count: {
+          select: {
+            comments: true,
+            likes: true
+          }
+        }
       }
+    }),
+
+    prisma.post.count()
+  ]);
+
+  // ✅ compute reaction counts per post
+  const postsWithReactions = posts.map(post => {
+    const reactionCounts = {};
+
+    post.likes.forEach(like => {
+      const type = like.reaction;
+      reactionCounts[type] = (reactionCounts[type] || 0) + 1;
     });
+
+    return {
+      ...post,
+      reactionCounts
+    };
+  });
+
+  res.json({
+    data: postsWithReactions,
+    meta: {
+      total,
+      page,
+      limit,
+      totalPages: Math.ceil(total / limit)
+    }
+  });
+});
+
+app.get('/posts/:id', async (req, res) => {
+  try {
+    const id = parseInt(req.params.id);
+
+    if (isNaN(id)) {
+      return res.status(400).json({ error: "Invalid post id" });
+    }
+
+   const post = await prisma.post.findUnique({
+  where: { id },
+  include: {
+    user: true,
+    comments: {
+      include: {
+        user: true,
+        replies: {
+          include: {
+            user: true,
+            replies: {
+              include: {
+                user: true
+              }
+            }
+          }
+        }
+      }
+    },
+    likes: true
+  }
+});
 
     if (!post) {
       return res.status(404).json({ error: "Post not found" });
     }
 
-    res.json({ data: post });
+    res.json({
+      data: post
+    });
 
   } catch (error) {
     console.error(error);
@@ -130,109 +134,102 @@ app.get('/api/posts/:id', async (req, res) => {
   }
 });
 
-// ✅ Counts
-app.get('/api/posts/:id/counts', async (req, res) => {
-  try {
-    const postId = parseInt(req.params.id);
+app.get('/posts/:id/counts', async (req, res) => {
+  const postId = parseInt(req.params.id);
 
-    const [likeCount, commentCount] = await Promise.all([
-      prisma.like.count({ where: { postId } }),
-      prisma.comment.count({ where: { postId } })
-    ]);
+  const [likeCount, commentCount] = await Promise.all([
+    await prisma.like.count({ where: { postId } }),
+    await prisma.comment.count({ where: { postId } })
+  ]);
 
-    res.json({ postId, likeCount, commentCount });
-
-  } catch (error) {
-    res.status(500).json({ error: "Internal server error" });
-  }
+  res.json({ postId, likeCount, commentCount });
 });
 
-// ✅ Comments with pagination
-app.get('/api/posts/:id/comments', async (req, res) => {
-  try {
-    const postId = parseInt(req.params.id);
-    const page = parseInt(req.query.page) || 1;
-    const limit = parseInt(req.query.limit) || 5;
-    const skip = (page - 1) * limit;
 
-    const comments = await prisma.comment.findMany({
-      where: { postId },
-      include: {
-        user: true,
-        replies: {
-          include: { user: true }
+app.get('/posts/:id/comments', async (req, res) => {
+  const postId = parseInt(req.params.id);
+
+  const page = parseInt(req.query.page) || 1;
+  const limit = parseInt(req.query.limit) || 5;
+
+  const skip = (page - 1) * limit;
+
+  const comments = await prisma.comment.findMany({
+    where: { postId },
+    include: {
+      user: true, replies: {
+        include: {
+          user: true
         }
-      },
-      skip,
-      take: limit,
-      orderBy: { id: 'desc' }
-    });
+      }
+    },
+    skip,
+    take: limit,
+    orderBy: { id: 'desc' }
+  });
 
-    const total = await prisma.comment.count({ where: { postId } });
+  const total = await prisma.comment.count({ where: { postId } });
 
-    res.json({
-      page,
-      limit,
-      total,
-      totalPages: Math.ceil(total / limit),
-      data: comments
-    });
-
-  } catch (error) {
-    res.status(500).json({ error: "Internal server error" });
-  }
+  res.json({
+    page,
+    limit,
+    total,
+    totalPages: Math.ceil(total / limit),
+    data: comments
+  });
 });
 
-// ✅ Reaction
-app.post('/api/posts/:id/reaction', async (req, res) => {
+app.post('/posts/:id/reaction', async (req, res) => {
   try {
     const postId = parseInt(req.params.id);
     const { userId, reaction } = req.body;
 
     if (!userId || !reaction) {
-      return res.status(400).json({ error: "userId and reaction required" });
+      return res.status(400).json({ error: "userId and reaction are required" });
     }
 
     const like = await prisma.like.upsert({
       where: {
-        userId_postId: { userId, postId }
+        userId_postId: {
+          userId,
+          postId
+        }
       },
-      update: { reaction },
-      create: { userId, postId, reaction }
+      update: {
+        reaction
+      },
+      create: {
+        userId,
+        postId,
+        reaction
+      }
     });
 
     res.json(like);
-
   } catch (error) {
+    console.error(error);
     res.status(500).json({ error: "Internal server error" });
   }
 });
 
-// ✅ Add comment
-app.post('/api/posts/:id/comment', async (req, res) => {
-  try {
-    const { userId, text } = req.body;
-    const postId = parseInt(req.params.id);
+app.post('/posts/:id/comment', async (req, res) => {
+  const { userId, text } = req.body;
+  const postId = parseInt(req.params.id);
 
-    const comment = await prisma.comment.create({
-      data: { userId, postId, text }
-    });
+  const comment = await prisma.comment.create({
+    data: { userId, postId, text }
+  });
 
-    res.json(comment);
-
-  } catch (error) {
-    res.status(500).json({ error: "Internal server error" });
-  }
+  res.json(comment);
 });
 
-// ✅ Reply
-app.post('/api/comments/:id/reply', async (req, res) => {
+app.post('/comments/:id/reply', async (req, res) => {
   try {
     const commentId = parseInt(req.params.id);
     const { userId, text, parentId } = req.body;
 
     if (!userId || !text) {
-      return res.status(400).json({ error: "userId and text required" });
+      return res.status(400).json({ error: "userId and text are required" });
     }
 
     const reply = await prisma.commentReply.create({
@@ -242,17 +239,17 @@ app.post('/api/comments/:id/reply', async (req, res) => {
         commentId,
         parentId: parentId || null
       },
-      include: { user: true }
+      include: {
+        user: true
+      }
     });
 
     res.json(reply);
-
   } catch (error) {
+    console.error(error);
     res.status(500).json({ error: "Internal server error" });
   }
 });
-
-/* ===================== EXPORT (IMPORTANT) ===================== */
 
 // ❌ NO app.listen()
 // ✅ Export for Vercel
