@@ -98,28 +98,28 @@ app.get('/posts/:id', async (req, res) => {
       return res.status(400).json({ error: "Invalid post id" });
     }
 
-   const post = await prisma.post.findUnique({
-  where: { id },
-  include: {
-    user: true,
-    comments: {
+    const post = await prisma.post.findUnique({
+      where: { id },
       include: {
         user: true,
-        replies: {
+        comments: {
           include: {
             user: true,
             replies: {
               include: {
-                user: true
+                user: true,
+                replies: {
+                  include: {
+                    user: true
+                  }
+                }
               }
             }
           }
-        }
+        },
+        likes: true
       }
-    },
-    likes: true
-  }
-});
+    });
 
     if (!post) {
       return res.status(404).json({ error: "Post not found" });
@@ -134,6 +134,38 @@ app.get('/posts/:id', async (req, res) => {
     res.status(500).json({ error: "Internal server error" });
   }
 });
+
+app.get('/users/:id', async (req, res) => {
+  try {
+    const id = parseInt(req.params.id);
+
+    if (isNaN(id)) {
+      return res.status(400).json({ error: "Invalid post id" });
+    }
+
+    const user = await prisma.user.findUnique({
+      where: { id },
+      select:{
+        name:true,
+        id:true,
+        profile:true
+      }
+    });
+
+    if (!user) {
+      return res.status(404).json({ error: "User not found" });
+    }
+
+    res.json({
+      data: user
+    });
+
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
 
 app.get('/posts/:id/counts', async (req, res) => {
   const postId = parseInt(req.params.id);
