@@ -145,10 +145,10 @@ app.get('/users/:id', async (req, res) => {
 
     const user = await prisma.user.findUnique({
       where: { id },
-      select:{
-        name:true,
-        id:true,
-        profile:true
+      select: {
+        name: true,
+        id: true,
+        profile: true
       }
     });
 
