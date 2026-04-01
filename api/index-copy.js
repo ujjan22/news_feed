@@ -51,10 +51,21 @@ app.get('/posts', async (req, res) => {
         // ✅ include reactions
         likes: true,
 
-        _count: {
-          select: {
-            comments: true,
-            likes: true
+        include: {
+          comments: {
+            include: {
+              _count: {
+                select: {
+                  commentReply: true
+                }
+              }
+            }
+          },
+          _count: {
+            select: {
+              comments: true,
+              likes: true
+            }
           }
         }
       }
