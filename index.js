@@ -31,27 +31,7 @@ app.get('/posts', async (req, res) => {
       },
       include: {
         user: true,
-
-        // ✅ nested comments + replies
-        comments: {
-          include: {
-            user: true,
-            replies: {
-              include: {
-                user: true,
-                replies: {
-                  include: {
-                    user: true
-                  }
-                }
-              }
-            }
-          }
-        },
-
-        // ✅ include reactions
         likes: true,
-
         _count: {
           select: {
             comments: true,
