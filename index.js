@@ -31,7 +31,9 @@ app.get('/posts', async (req, res) => {
       },
       include: {
         user: true,
-        likes: true,
+        likes: {
+          userId:true,
+        },
         _count: {
           select: {
             comments: true,
