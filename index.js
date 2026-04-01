@@ -34,7 +34,6 @@ app.get('/posts', async (req, res) => {
         likes: true,
         _count: {
           select: {
-            commentReply:true,
             comments: true,
             likes: true
           }
