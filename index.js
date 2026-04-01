@@ -82,21 +82,6 @@ app.get('/posts/:id', async (req, res) => {
       where: { id },
       include: {
         user: true,
-        comments: {
-          include: {
-            user: true,
-            replies: {
-              include: {
-                user: true,
-                replies: {
-                  include: {
-                    user: true
-                  }
-                }
-              }
-            }
-          }
-        },
         likes: true
       }
     });
