@@ -36,7 +36,7 @@ app.get('/posts', async (req, res) => {
           include: {
             _count: {
               select: {
-                commentReply: true
+                replies: true
               }
             }
           }
