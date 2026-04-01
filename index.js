@@ -17,58 +17,91 @@ app.use(cors({
 app.use(express.json());
 
 app.get('/posts', async (req, res) => {
-  const page = parseInt(req.query.page) || 1;
-  const limit = parseInt(req.query.limit) || 10;
+  try {
+    const page = parseInt(req.query.page) || 1;
+    const limit = parseInt(req.query.limit) || 10;
 
-  const skip = (page - 1) * limit;
+    const skip = (page - 1) * limit;
 
-  const [posts, total] = await Promise.all([
-    prisma.post.findMany({
-      skip,
-      take: limit,
-      orderBy: {
-        createdAt: 'desc'
-      },
-      include: {
-        user: true,
-        likes: true,
-        _count: {
-          select: {
-            comments: true,
-            likes: true
+    const [posts, total] = await Promise.all([
+      prisma.post.findMany({
+        skip,
+        take: limit,
+        orderBy: {
+          createdAt: 'desc'
+        },
+        include: {
+          user: true,
+          likes: true,
+          comments: {
+            select: {
+              id: true,
+              _count: {
+                select: {
+                  replies: true
+                }
+              }
+            }
+          },
+          _count: {
+            select: {
+              comments: true,
+              likes: true
+            }
           }
         }
+      }),
+      prisma.post.count()
+    ]);
 
-      }
-    }),
+    // ✅ format response
+    const postsWithReactions = posts.map(post => {
+      const reactionCounts = {};
+      let replyCount = 0;
 
-    prisma.post.count()
-  ]);
+      // ✅ reaction count
+      post.likes.forEach(like => {
+        const type = like.reaction;
+        reactionCounts[type] = (reactionCounts[type] || 0) + 1;
+      });
 
-  // ✅ compute reaction counts per post
-  const postsWithReactions = posts.map(post => {
-    const reactionCounts = {};
+      // ✅ total replies per post
+      post.comments.forEach(comment => {
+        replyCount += comment._count.replies;
+      });
 
-    post.likes.forEach(like => {
-      const type = like.reaction;
-      reactionCounts[type] = (reactionCounts[type] || 0) + 1;
+      return {
+        id: post.id,
+        user: post.user,
+
+        // counts
+        commentCount: post._count.comments,
+        likeCount: post._count.likes,
+        replyCount,
+
+        // reactions
+        reactionCounts,
+
+        createdAt: post.createdAt
+      };
     });
 
-    return {
-      ...post,
-      reactionCounts
-    };
-  });
+    res.json({
+      data: postsWithReactions,
+      meta: {
+        total,
+        page,
+        limit,
+        totalPages: Math.ceil(total / limit)
+      }
+    });
 
-  res.json({
-    data: postsWithReactions,
-    meta: {
-      total,
-      page,
-      limit,
-      totalPages: Math.ceil(total / limit)
-    }
-  });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({
+      message: 'Something went wrong'
+    });
+  }
 });
 
 app.get('/posts/:id', async (req, res) => {
