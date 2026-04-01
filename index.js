@@ -33,7 +33,6 @@ app.get('/posts', async (req, res) => {
         user: true,
         likes: true,
         comments: {
-          select:{},
           include: {
             _count: {
               select: {
