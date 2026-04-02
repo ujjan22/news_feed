@@ -15,7 +15,7 @@ app.use(cors({
 }));
 
 app.use(express.json());
-
+const getRandomPostImage = (id) => `https://picsum.photos/seed/post-${id}/600/400`;
 app.get('/posts', async (req, res) => {
   const page = parseInt(req.query.page) || 1;
   const limit = parseInt(req.query.limit) || 10;
@@ -68,6 +68,38 @@ app.get('/posts', async (req, res) => {
       totalPages: Math.ceil(total / limit)
     }
   });
+});
+
+app.post('/posts', async (req, res) => {
+  try {
+    const { content, userId } = req.body;
+
+    if (!content || !userId) {
+      return res.status(400).json({ error: "Content and userId are required" });
+    }
+
+    // Create the post without image first
+    const post = await prisma.post.create({
+      data: {
+        content,
+        user: { connect: { id: userId } }
+      },
+    });
+
+    // Generate a random image based on post ID
+    const imageUrl = getRandomPostImage(post.id);
+
+    // Update post with generated image
+    await prisma.post.update({
+      where: { id: post.id },
+      data: { image: imageUrl }
+    });
+
+    res.status(201).json({message: "Post Created Sucessfully !!"});
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Something went wrong" });
+  }
 });
 
 app.get('/posts/:id', async (req, res) => {
