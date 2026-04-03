@@ -73,9 +73,9 @@ model CommentReply {
   comment   Comment @relation(fields: [commentId], references: [id])
 
   parentId String? @db.ObjectId
-  parent   CommentReply? @relation("ReplyThread", fields: [parentId], references: [id])
+  // parent   CommentReply? @relation("ReplyThread", fields: [parentId], references: [id])
 
-  replies CommentReply[] @relation("ReplyThread")
+  // replies CommentReply[] @relation("ReplyThread")
 }
 
 model Like {
@@ -88,7 +88,7 @@ model Like {
   post   Post   @relation(fields: [postId], references: [id])
 
   reaction  ReactionType @default(LIKE)
-  createdAt DateTime @default(now())
+  createdAt DateTime     @default(now())
 
   @@unique([userId, postId])
 }
