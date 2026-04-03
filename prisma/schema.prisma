@@ -4,8 +4,7 @@ generator client {
 }
 
 datasource db {
-  provider     = "postgresql"
-  relationMode = "foreignKeys"
+  provider = "mongodb"
 }
 
 enum ReactionType {
@@ -23,7 +22,7 @@ enum Role {
 }
 
 model User {
-  id      Int     @id @default(autoincrement())
+  id      String  @id @default(auto()) @map("_id") @db.ObjectId
   name    String
   profile String?
   role    Role
@@ -32,79 +31,64 @@ model User {
   comments       Comment[]
   likes          Like[]
   commentReplies CommentReply[]
-
-  @@index([role])
 }
 
 model Post {
-  id        Int      @id @default(autoincrement())
+  id        String   @id @default(auto()) @map("_id") @db.ObjectId
   content   String
   image     String?
   location  String?
   createdAt DateTime @default(now())
 
-  user   User @relation(fields: [userId], references: [id], onDelete: Cascade)
-  userId Int
+  userId String @db.ObjectId
+  user   User   @relation(fields: [userId], references: [id])
 
   comments Comment[]
   likes    Like[]
-
-  @@index([userId])
-  @@index([createdAt])
 }
 
 model Comment {
-  id        Int      @id @default(autoincrement())
+  id        String   @id @default(auto()) @map("_id") @db.ObjectId
   text      String
   createdAt DateTime @default(now())
 
-  user   User @relation(fields: [userId], references: [id], onDelete: Cascade)
-  userId Int
+  userId String @db.ObjectId
+  user   User   @relation(fields: [userId], references: [id])
 
-  post   Post @relation(fields: [postId], references: [id], onDelete: Cascade)
-  postId Int
+  postId String @db.ObjectId
+  post   Post   @relation(fields: [postId], references: [id])
 
   replies CommentReply[]
-
-  @@index([userId])
-  @@index([postId])
 }
 
 model CommentReply {
-  id        Int      @id @default(autoincrement())
+  id        String   @id @default(auto()) @map("_id") @db.ObjectId
   text      String
   createdAt DateTime @default(now())
 
-  user   User @relation(fields: [userId], references: [id], onDelete: Cascade)
-  userId Int
+  userId String @db.ObjectId
+  user   User   @relation(fields: [userId], references: [id])
 
-  comment   Comment @relation(fields: [commentId], references: [id], onDelete: Cascade)
-  commentId Int
+  commentId String  @db.ObjectId
+  comment   Comment @relation(fields: [commentId], references: [id])
 
-  // Self-referencing for nested replies
-  parent   CommentReply? @relation("ReplyThread", fields: [parentId], references: [id], onDelete: Cascade)
-  parentId Int?
+  parentId String? @db.ObjectId
+  parent   CommentReply? @relation("ReplyThread", fields: [parentId], references: [id])
 
   replies CommentReply[] @relation("ReplyThread")
-
-  @@index([commentId])
-  @@index([parentId])
-  @@index([userId])
 }
 
 model Like {
-  id Int @id @default(autoincrement())
+  id String @id @default(auto()) @map("_id") @db.ObjectId
 
-  user   User @relation(fields: [userId], references: [id], onDelete: Cascade)
-  userId Int
+  userId String @db.ObjectId
+  user   User   @relation(fields: [userId], references: [id])
 
-  post   Post @relation(fields: [postId], references: [id], onDelete: Cascade)
-  postId Int
+  postId String @db.ObjectId
+  post   Post   @relation(fields: [postId], references: [id])
 
-  reaction ReactionType @default(LIKE)
+  reaction  ReactionType @default(LIKE)
   createdAt DateTime @default(now())
 
   @@unique([userId, postId])
-  @@index([userId])
-  @@index([postId])
 }
