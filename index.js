@@ -1,4 +1,5 @@
 // api/index.js
+require('dotenv').config();
 const express = require("express");
 const mongoose = require("mongoose");
 const cors = require("cors");
@@ -170,9 +171,56 @@ app.post("/posts/:id/comment", async (req, res) => {
 });
 
 app.get("/posts/:id/comments", async (req, res) => {
-  await connectToDatabase();
-  const comments = await Comment.find({ postId: req.params.id }).sort({ createdAt: -1 }).limit(10);
-  res.json(comments);
+  try {
+    const postId = req.params.id;
+    const page = parseInt(req.query.page) || 1;
+    const limit = parseInt(req.query.limit) || 10;
+    const skip = (page - 1) * limit;
+
+    // 1️⃣ Fetch comments for the post
+    const comments = await Comment.find({ postId })
+      .sort({ createdAt: -1 })
+      .skip(skip)
+      .limit(limit)
+      .lean(); // lean for faster query, returns plain JS objects
+
+    // 2️⃣ Fetch replies for these comments
+    const commentIds = comments.map(c => c._id);
+
+    const replies = await Reply.find({ commentId: { $in: commentIds } })
+      .sort({ createdAt: 1 }) // replies in chronological order
+      .lean();
+
+    // 3️⃣ Group replies by commentId
+    const repliesByComment = {};
+    replies.forEach(reply => {
+      if (!repliesByComment[reply.commentId]) {
+        repliesByComment[reply.commentId] = [];
+      }
+      repliesByComment[reply.commentId].push(reply);
+    });
+
+    // 4️⃣ Attach replies to each comment
+    const commentsWithReplies = comments.map(comment => ({
+      ...comment,
+      replies: repliesByComment[comment._id] || []
+    }));
+
+    // 5️⃣ Total count
+    const total = await Comment.countDocuments({ postId });
+
+    res.json({
+      page,
+      limit,
+      total,
+      totalPages: Math.ceil(total / limit),
+      data: commentsWithReplies
+    });
+
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ error: "Internal server error" });
+  }
 });
 
 app.post("/comments/:id/reply", async (req, res) => {
@@ -191,4 +239,6 @@ app.post("/comments/:id/reply", async (req, res) => {
   res.json(reply);
 });
 
-module.exports = app;
+app.listen(3000, () => {
+  console.log('Server running on http://localhost:3000');
+});
