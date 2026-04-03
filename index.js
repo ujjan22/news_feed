@@ -1,8 +1,15 @@
+require("dotenv").config();
 process.env.NODE_TLS_REJECT_UNAUTHORIZED = "0";
-const express = require('express');
-const { prisma } = require("./prisma/prisma")
-const cors = require('cors');
+
+const express = require("express");
+const mongoose = require("mongoose");
+const cors = require("cors");
+
 const app = express();
+
+/* =======================
+   MIDDLEWARE
+======================= */
 app.use(cors({
   origin: [
     'http://localhost:3000',
@@ -10,57 +17,140 @@ app.use(cors({
     "https://nephological-supersecurely-fae.ngrok-free.dev",
     "https://homeiz-trial-three.vercel.app"
   ],
-  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
   credentials: true
 }));
 
 app.use(express.json());
-const getRandomPostImage = (id) => `https://picsum.photos/seed/post-${id}/600/400`;
-app.get('/posts', async (req, res) => {
+
+/* =======================
+   MONGODB CONNECTION
+======================= */
+mongoose.connect(process.env.MONGO_URL)
+  .then(() => console.log("MongoDB Connected"))
+  .catch(err => console.error(err));
+
+/* =======================
+   MODELS
+======================= */
+
+// USER
+const userSchema = new mongoose.Schema({
+  name: String,
+  profile: String,
+  role: {
+    type: String,
+    enum: ["ADMIN", "GUEST"],
+    default: "GUEST"
+  }
+}, { timestamps: true });
+
+const User = mongoose.model("User", userSchema);
+
+// POST
+const postSchema = new mongoose.Schema({
+  content: String,
+  image: String,
+  location: String,
+
+  user: {
+    _id: mongoose.Schema.Types.ObjectId,
+    name: String,
+    profile: String
+  },
+
+  reactions: [
+    {
+      user: mongoose.Schema.Types.ObjectId,
+      type: {
+        type: String,
+        enum: ["LIKE", "LOVE", "HAHA", "WOW", "SAD", "ANGRY"]
+      }
+    }
+  ],
+
+  reactionCounts: {
+    LIKE: { type: Number, default: 0 },
+    LOVE: { type: Number, default: 0 },
+    HAHA: { type: Number, default: 0 },
+    WOW: { type: Number, default: 0 },
+    SAD: { type: Number, default: 0 },
+    ANGRY: { type: Number, default: 0 }
+  },
+
+  commentsCount: { type: Number, default: 0 }
+
+}, { timestamps: true });
+
+postSchema.index({ createdAt: -1 });
+
+const Post = mongoose.model("Post", postSchema);
+
+// COMMENT
+const commentSchema = new mongoose.Schema({
+  text: String,
+
+  user: {
+    _id: mongoose.Schema.Types.ObjectId,
+    name: String,
+    profile: String
+  },
+
+  postId: mongoose.Schema.Types.ObjectId
+
+}, { timestamps: true });
+
+commentSchema.index({ postId: 1 });
+
+const Comment = mongoose.model("Comment", commentSchema);
+
+// REPLY
+const replySchema = new mongoose.Schema({
+  text: String,
+
+  user: {
+    _id: mongoose.Schema.Types.ObjectId,
+    name: String,
+    profile: String
+  },
+
+  commentId: mongoose.Schema.Types.ObjectId,
+  parentId: {
+    type: mongoose.Schema.Types.ObjectId,
+    default: null
+  }
+
+}, { timestamps: true });
+
+const Reply = mongoose.model("Reply", replySchema);
+
+/* =======================
+   HELPERS
+======================= */
+const getRandomPostImage = () =>
+  `https://picsum.photos/seed/post-${Date.now()}/600/400`;
+
+/* =======================
+   ROUTES
+======================= */
+
+// GET POSTS
+app.get("/posts", async (req, res) => {
   const page = parseInt(req.query.page) || 1;
   const limit = parseInt(req.query.limit) || 10;
 
   const skip = (page - 1) * limit;
 
   const [posts, total] = await Promise.all([
-    prisma.post.findMany({
-      skip,
-      take: limit,
-      orderBy: {
-        createdAt: 'desc'
-      },
-      include: {
-        user: true,
-        likes: true,
-        _count: {
-          select: {
-            comments: true,
-            likes: true
-          }
-        }
-      }
-    }),
+    Post.find()
+      .sort({ createdAt: -1 })
+      .skip(skip)
+      .limit(limit),
 
-    prisma.post.count()
+    Post.countDocuments()
   ]);
 
-  // ✅ compute reaction counts per post
-  const postsWithReactions = posts.map(post => {
-    const reactionCounts = {};
-
-    post.likes.forEach(like => {
-      const type = like.reaction;
-      reactionCounts[type] = (reactionCounts[type] || 0) + 1;
-    });
-
-    return {
-      ...post,
-      reactionCounts
-    };
-  });
-
   res.json({
-    data: postsWithReactions,
+    data: posts,
     meta: {
       total,
       page,
@@ -70,217 +160,125 @@ app.get('/posts', async (req, res) => {
   });
 });
 
-app.post('/posts', async (req, res) => {
+// CREATE POST
+app.post("/posts", async (req, res) => {
   try {
     const { content, userId } = req.body;
 
     if (!content || !userId) {
-      return res.status(400).json({ error: "Content and userId are required" });
+      return res.status(400).json({ error: "content and userId required" });
     }
 
-    // Create the post without image first
-    const post = await prisma.post.create({
-      data: {
-        content,
-        user: { connect: { id: userId } }
-      },
+    const user = await User.findById(userId);
+
+    const post = await Post.create({
+      content,
+      image: getRandomPostImage(),
+      user: {
+        _id: user._id,
+        name: user.name,
+        profile: user.profile
+      }
     });
 
-    // Generate a random image based on post ID
-    const imageUrl = getRandomPostImage(post.id);
-
-    // Update post with generated image
-    await prisma.post.update({
-      where: { id: post.id },
-      data: { image: imageUrl }
-    });
-
-    res.status(201).json({message: "Post Created Sucessfully !!"});
+    res.status(201).json(post);
   } catch (err) {
-    console.error(err);
-    res.status(500).json({ error: "Something went wrong" });
+    res.status(500).json({ error: "Error creating post" });
   }
 });
 
-app.get('/posts/:id', async (req, res) => {
-  try {
-    const id = parseInt(req.params.id);
+// GET SINGLE POST
+app.get("/posts/:id", async (req, res) => {
+  const post = await Post.findById(req.params.id);
 
-    if (isNaN(id)) {
-      return res.status(400).json({ error: "Invalid post id" });
-    }
+  if (!post) return res.status(404).json({ error: "Post not found" });
 
-    const post = await prisma.post.findUnique({
-      where: { id },
-      include: {
-        user: true,
-        likes: true
-      }
-    });
+  res.json(post);
+});
 
-    if (!post) {
-      return res.status(404).json({ error: "Post not found" });
-    }
+// GET USER
+app.get("/users/:id", async (req, res) => {
+  const user = await User.findById(req.params.id).select("name profile _id");
 
-    res.json({
-      data: post
-    });
+  if (!user) return res.status(404).json({ error: "User not found" });
 
-  } catch (error) {
-    console.error(error);
-    res.status(500).json({ error: "Internal server error" });
+  res.json(user);
+});
+
+// REACTION
+app.post("/posts/:id/reaction", async (req, res) => {
+  const { userId, reaction } = req.body;
+
+  const post = await Post.findById(req.params.id);
+
+  const existing = post.reactions.find(
+    r => r.user.toString() === userId
+  );
+
+  if (existing) {
+    post.reactionCounts[existing.type]--;
+    existing.type = reaction;
+  } else {
+    post.reactions.push({ user: userId, type: reaction });
   }
+
+  post.reactionCounts[reaction]++;
+
+  await post.save();
+
+  res.json(post.reactionCounts);
 });
 
-app.get('/users/:id', async (req, res) => {
-  try {
-    const id = parseInt(req.params.id);
-
-    if (isNaN(id)) {
-      return res.status(400).json({ error: "Invalid post id" });
-    }
-
-    const user = await prisma.user.findUnique({
-      where: { id },
-      select: {
-        name: true,
-        id: true,
-        profile: true
-      }
-    });
-
-    if (!user) {
-      return res.status(404).json({ error: "User not found" });
-    }
-
-    res.json({
-      data: user
-    });
-
-  } catch (error) {
-    console.error(error);
-    res.status(500).json({ error: "Internal server error" });
-  }
-});
-
-
-app.get('/posts/:id/counts', async (req, res) => {
-  const postId = parseInt(req.params.id);
-
-  const [likeCount, commentCount] = await Promise.all([
-    await prisma.like.count({ where: { postId } }),
-    await prisma.comment.count({ where: { postId } })
-  ]);
-
-  res.json({ postId, likeCount, commentCount });
-});
-
-
-app.get('/posts/:id/comments', async (req, res) => {
-  const postId = parseInt(req.params.id);
-
-  const page = parseInt(req.query.page) || 1;
-  const limit = parseInt(req.query.limit) || 5;
-
-  const skip = (page - 1) * limit;
-
-  const comments = await prisma.comment.findMany({
-    where: { postId },
-    include: {
-      user: true, replies: {
-        include: {
-          user: true
-        }
-      }
-    },
-    skip,
-    take: limit,
-    orderBy: { id: 'desc' }
-  });
-
-  const total = await prisma.comment.count({ where: { postId } });
-
-  res.json({
-    page,
-    limit,
-    total,
-    totalPages: Math.ceil(total / limit),
-    data: comments
-  });
-});
-
-app.post('/posts/:id/reaction', async (req, res) => {
-  try {
-    const postId = parseInt(req.params.id);
-    const { userId, reaction } = req.body;
-
-    if (!userId || !reaction) {
-      return res.status(400).json({ error: "userId and reaction are required" });
-    }
-
-    const like = await prisma.like.upsert({
-      where: {
-        userId_postId: {
-          userId,
-          postId
-        }
-      },
-      update: {
-        reaction
-      },
-      create: {
-        userId,
-        postId,
-        reaction
-      }
-    });
-
-    res.json(like);
-  } catch (error) {
-    console.error(error);
-    res.status(500).json({ error: "Internal server error" });
-  }
-});
-
-app.post('/posts/:id/comment', async (req, res) => {
+// ADD COMMENT
+app.post("/posts/:id/comment", async (req, res) => {
   const { userId, text } = req.body;
-  const postId = parseInt(req.params.id);
 
-  const comment = await prisma.comment.create({
-    data: { userId, postId, text }
+  const user = await User.findById(userId);
+
+  const comment = await Comment.create({
+    text,
+    postId: req.params.id,
+    user: {
+      _id: user._id,
+      name: user.name,
+      profile: user.profile
+    }
+  });
+
+  await Post.findByIdAndUpdate(req.params.id, {
+    $inc: { commentsCount: 1 }
   });
 
   res.json(comment);
 });
 
-app.post('/comments/:id/reply', async (req, res) => {
-  try {
-    const commentId = parseInt(req.params.id);
-    const { userId, text, parentId } = req.body;
+// GET COMMENTS
+app.get("/posts/:id/comments", async (req, res) => {
+  const comments = await Comment.find({ postId: req.params.id })
+    .sort({ createdAt: -1 })
+    .limit(10);
 
-    if (!userId || !text) {
-      return res.status(400).json({ error: "userId and text are required" });
-    }
-
-    const reply = await prisma.commentReply.create({
-      data: {
-        text,
-        userId,
-        commentId,
-        parentId: parentId || null
-      },
-      include: {
-        user: true
-      }
-    });
-
-    res.json(reply);
-  } catch (error) {
-    console.error(error);
-    res.status(500).json({ error: "Internal server error" });
-  }
+  res.json(comments);
 });
 
-// ❌ NO app.listen()
-// ✅ Export for Vercel
+// ADD REPLY
+app.post("/comments/:id/reply", async (req, res) => {
+  const { userId, text, parentId } = req.body;
+
+  const user = await User.findById(userId);
+
+  const reply = await Reply.create({
+    text,
+    commentId: req.params.id,
+    parentId: parentId || null,
+    user: {
+      _id: user._id,
+      name: user.name,
+      profile: user.profile
+    }
+  });
+
+  res.json(reply);
+});
+
 module.exports = app;
